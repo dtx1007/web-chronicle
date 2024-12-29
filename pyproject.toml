@@ -6,9 +6,10 @@ authors     = ["dtx1007 <148854108+dtx1007@users.noreply.github.com>"]
 readme      = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
-flask = "^3.0.3"
+python     = "^3.12"
+flask      = "^3.0.3"
 sqlalchemy = "^2.0.36"
+flask-sock = "^0.7.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -22,14 +23,15 @@ pytest = "^8.3.3"
 
 
 [tool.mypy]
-python_version        = "3.12"
-warn_unused_configs   = true
-warn_no_return        = true
-disallow_untyped_defs = true
-warn_unused_ignores   = true
-warn_redundant_casts  = true
-warn_unreachable      = true
-show_error_context    = true
+python_version         = "3.12"
+warn_unused_configs    = true
+warn_no_return         = true
+disallow_untyped_defs  = true
+warn_unused_ignores    = true
+warn_redundant_casts   = true
+warn_unreachable       = true
+show_error_context     = true
+ignore_missing_imports = true
 
 
 [build-system]
