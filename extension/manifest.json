@@ -2,11 +2,22 @@
     "manifest_version": 3,
     "name": "WebChronicle's Input Logger",
     "version": "1.0",
-    "permissions": ["scripting", "activeTab", "storage"],
+    "permissions": [
+        "scripting",
+        "activeTab",
+        "storage",
+        "tabs"
+    ],
     "minimum_chrome_version": "102",
     "background": {
         "service_worker": "background.js",
         "type": "module"
     },
-    "host_permissions": ["http://*/*", "https://*/*"]
+    "host_permissions": [
+        "http://*/*",
+        "https://*/*"
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    }
 }

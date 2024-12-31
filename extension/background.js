@@ -2,15 +2,27 @@ import { Logger } from './logger.js';
 import { setupWebSocket, notifyServer } from './websocket.js';
 
 const logger = new Logger('background.js');
-
-// TODO: Permitir extender lista de sitios bloqueados (sync con server u otro método)
-const blacklistedSites = ['example.com'];
+let blacklistedSites = [];
 
 let ws;
 
 function initExtension() {
     logger.info('Extension started');
     ws = setupWebSocket();
+
+    chrome.storage.sync.get({ blacklistedSites: [] }, (data) => {
+        blacklistedSites = data.blacklistedSites;
+        logger.info('Loaded blacklisted sites:', blacklistedSites);
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync' && changes.blacklistedSites) {
+            blacklistedSites = changes.blacklistedSites.newValue || [];
+            logger.info('Updated blacklisted sites:', blacklistedSites);
+
+            notifyServer(ws, 'update_blacklist', blacklistedSites);
+        }
+    });
 }
 
 chrome.runtime.onInstalled.addListener(initExtension);

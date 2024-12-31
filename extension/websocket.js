@@ -34,7 +34,7 @@ export function notifyServer(ws, type, message) {
         ws.send(JSON.stringify({ type, message }));
     } else {
         logger.warn(
-            'Could not sent message to server, WebSocket is not connected'
+            'Could not send message to server, WebSocket is not connected'
         );
     }
 }
