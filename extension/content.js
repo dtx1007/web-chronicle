@@ -1,4 +1,9 @@
+let isTracking = true;
+let eventListeners = [];
+
 function logEvent(eventName, details) {
+    if (!isTracking) return;
+
     const eventData = {
         timestamp: new Date().toISOString(),
         event: eventName,
@@ -10,6 +15,7 @@ function logEvent(eventName, details) {
 
 function registerSimpleEvent(eventName, details) {
     return (event) => {
+        if (!isTracking) return;
         logEvent(eventName, details(event));
     };
 }
@@ -18,6 +24,8 @@ function registerDebouncedEvent(eventName, details, debounceTime) {
     let timeout = null;
 
     return (event) => {
+        if (!isTracking) return;
+
         if (timeout) {
             clearTimeout(timeout);
         }
@@ -32,6 +40,8 @@ function registerBufferedEvent(eventName, details, maxEvents) {
     let events = [];
 
     return (event) => {
+        if (!isTracking) return;
+
         events.push(event);
 
         if (events.length >= maxEvents) {
@@ -40,8 +50,6 @@ function registerBufferedEvent(eventName, details, maxEvents) {
         }
     };
 }
-
-// Registro de eventos
 
 const logClick = registerSimpleEvent('click', (event) => {
     return {
@@ -75,6 +83,50 @@ const logInput = registerSimpleEvent('input', (event) => {
     };
 });
 
-document.addEventListener('click', logClick);
-document.addEventListener('scroll', logScroll);
-document.querySelectorAll('keydown', logInput);
+function attachEventListeners() {
+    eventListeners = [
+        { type: 'click', handler: logClick },
+        { type: 'scroll', handler: logScroll },
+        { type: 'keydown', handler: logInput }
+    ];
+
+    eventListeners.forEach(listener => {
+        document.addEventListener(listener.type, listener.handler);
+    });
+}
+
+function removeEventListeners() {
+    eventListeners.forEach(listener => {
+        document.removeEventListener(listener.type, listener.handler);
+    });
+    eventListeners = [];
+}
+
+// Verificar estado inicial del tracking y configurar listeners
+chrome.storage.local.get({ trackingEnabled: true }, (data) => {
+    isTracking = data.trackingEnabled;
+    if (isTracking) {
+        attachEventListeners();
+    }
+});
+
+// Escuchar cambios en el estado del tracking
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.trackingEnabled) {
+        isTracking = changes.trackingEnabled.newValue;
+        if (isTracking) {
+            attachEventListeners();
+        } else {
+            removeEventListeners();
+        }
+    }
+});
+
+window.addEventListener('tracking_disabled', () => {
+    isTracking = false;
+    removeEventListeners();
+});
+
+if (isTracking) {
+    attachEventListeners();
+}

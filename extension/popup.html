@@ -23,6 +23,32 @@
             margin-top: 20px;
         }
 
+        .session-info {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border: 1px solid #dee2e6;
+        }
+
+        .session-info p {
+            margin: 5px 0;
+            color: #495057;
+        }
+
+        .session-id {
+            font-family: monospace;
+            background-color: #e9ecef;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
+        .blacklist-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
         label {
             display: block;
             margin-bottom: 5px;
@@ -71,20 +97,31 @@
             background-color: #545b62;
         }
 
-        #addBlacklistSite {
+        #addBlacklistSite, #addCurrentSite {
             background-color: #28a745;
+            flex: 1;
+            margin-top: 0;
         }
 
-        #addBlacklistSite:hover {
+        #addBlacklistSite:hover, #addCurrentSite:hover {
             background-color: #218838;
         }
     </style>
 </head>
 <body>
+    <div class="session-info">
+        <p>Session ID: <span class="session-id" id="sessionId">-</span></p>
+        <p>Session Duration: <span id="sessionDuration">-</span></p>
+        <p>Session Status: <span id="sessionStatus">-</span></p>
+    </div>
+
     <h1>WebChronicle</h1>
     <label for="siteInput">Add site to blacklist:</label>
     <input id="siteInput" type="text" placeholder="Enter site URL (e.g., example.com)" />
-    <button id="addBlacklistSite">Add</button>
+    <div class="blacklist-controls">
+        <button id="addBlacklistSite">Add</button>
+        <button id="addCurrentSite">Add Current Site</button>
+    </div>
 
     <h2>Actions:</h2>
     <button id="openDashboard">Open Dashboard</button>
