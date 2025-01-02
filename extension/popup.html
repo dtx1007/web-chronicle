@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebChronicle</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="session-info">
+        <p>Session ID: <span class="session-id" id="sessionId">-</span></p>
+        <p>Session Duration: <span id="sessionDuration">-</span></p>
+        <p>Session Status: <span id="sessionStatus">-</span></p>
+    </div>
+
+    <h1>WebChronicle</h1>
+    <label for="siteInput">Add site to blacklist:</label>
+    <input id="siteInput" type="text" placeholder="Enter site URL (e.g., example.com)" />
+    <div class="blacklist-controls">
+        <button id="addBlacklistSite">Add</button>
+        <button id="addCurrentSite">Add Current Site</button>
+    </div>
+
+    <h2>Actions:</h2>
+    <button id="openDashboard">Open Dashboard</button>
+    <button id="toggleTracking">Enable Tracking</button>
+
+    <script src="popup.js"></script>
+</body>
+</html>

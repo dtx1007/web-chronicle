@@ -11,10 +11,21 @@ export function setupWebSocket() {
 
     ws.onmessage = (message) => {
         logger.info('Message from server:', message.data);
-        const data = JSON.parse(message.data);
-        logger.debug('Data:', data);
 
-        // TODO: Procesar el mensaje recibido
+        try {
+            const data = JSON.parse(message.data);
+            
+            // Validar el formato del mensaje (debe ser JSON y tener los campos type y message)
+            if (!data.type || !data.hasOwnProperty('message')) {
+                logger.error('Invalid message format received:', data);
+                return;
+            }
+        }
+        catch (error) {
+            logger.error('Error parsing message:', error);
+            return;
+        }
+        logger.debug('Data:', data);
     };
 
     ws.onclose = () => {
