@@ -26,9 +26,13 @@ def ws(ws) -> NoReturn:
         match message["type"]:
             case "event_logged":
                 print(f"Event message received: {message["message"]}")
+            case "tab_event":
+                print(f"Tab event message received: {message["message"]}")
+            case "window_data":
+                print(f"Window data message received: {message["message"]}")
             case "update_blacklist":
                 print(f"Blaclist update message received: {message["message"]}")
-            case 'tracking_state_changed':
+            case "tracking_state_changed":
                 print(f"Tracking state changed message received: {message["message"]}")
             case _:
                 print(f"Unknown message type received: '{message["type"]}'")

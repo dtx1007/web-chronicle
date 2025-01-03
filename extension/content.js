@@ -1,5 +1,6 @@
 let isTracking = true;
-let eventListeners = [];
+let documentEventListeners = [];
+let windowEventListeners = [];
 
 function logEvent(eventName, details) {
     if (!isTracking) return;
@@ -51,6 +52,29 @@ function registerBufferedEvent(eventName, details, maxEvents) {
     };
 }
 
+function attachEventListeners(documentEventListeners, windowEventListeners) {
+    documentEventListeners.forEach((listener) => {
+        document.addEventListener(listener.type, listener.handler);
+    });
+
+    windowEventListeners.forEach((listener) => {
+        window.addEventListener(listener.type, listener.handler);
+    });
+}
+
+function removeEventListeners(documentEventListeners, windowEventListeners) {
+    documentEventListeners.forEach((listener) => {
+        document.removeEventListener(listener.type, listener.handler);
+    });
+
+    windowEventListeners.forEach((listener) => {
+        window.removeEventListener(listener.type, listener.handler);
+    });
+
+    documentEventListeners = [];
+    windowEventListeners = [];
+}
+
 const logClick = registerSimpleEvent('click', (event) => {
     return {
         target: event.target.tagName,
@@ -83,30 +107,30 @@ const logInput = registerSimpleEvent('input', (event) => {
     };
 });
 
-function attachEventListeners() {
-    eventListeners = [
-        { type: 'click', handler: logClick },
-        { type: 'scroll', handler: logScroll },
-        { type: 'keydown', handler: logInput }
-    ];
+const logResize = registerDebouncedEvent(
+    'resize',
+    () => {
+        return {
+            width: window.innerWidth,
+            height: window.innerHeight,
+        };
+    },
+    500
+);
 
-    eventListeners.forEach(listener => {
-        document.addEventListener(listener.type, listener.handler);
-    });
-}
+documentEventListeners = [
+    { type: 'click', handler: logClick },
+    { type: 'scroll', handler: logScroll },
+    { type: 'keydown', handler: logInput },
+];
 
-function removeEventListeners() {
-    eventListeners.forEach(listener => {
-        document.removeEventListener(listener.type, listener.handler);
-    });
-    eventListeners = [];
-}
+windowEventListeners = [{ type: 'resize', handler: logResize }];
 
 // Verificar estado inicial del tracking y configurar listeners
 chrome.storage.local.get({ trackingEnabled: true }, (data) => {
     isTracking = data.trackingEnabled;
     if (isTracking) {
-        attachEventListeners();
+        attachEventListeners(documentEventListeners, windowEventListeners);
     }
 });
 
@@ -115,18 +139,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.trackingEnabled) {
         isTracking = changes.trackingEnabled.newValue;
         if (isTracking) {
-            attachEventListeners();
+            attachEventListeners(documentEventListeners, windowEventListeners);
         } else {
-            removeEventListeners();
+            removeEventListeners(documentEventListeners, windowEventListeners);
         }
     }
 });
 
 window.addEventListener('tracking_disabled', () => {
     isTracking = false;
-    removeEventListeners();
+    removeEventListeners(documentEventListeners, windowEventListeners);
 });
 
 if (isTracking) {
-    attachEventListeners();
+    attachEventListeners(documentEventListeners, windowEventListeners);
 }
