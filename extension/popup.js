@@ -18,10 +18,6 @@ function addCurrentSiteToBlacklist() {
     });
 }
 
-function generateSessionId() {
-    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
-
 function formatDuration(milliseconds) {
     const seconds = Math.floor(milliseconds / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -43,30 +39,18 @@ function updateSessionInfo() {
         const sessionDuration = document.getElementById('sessionDuration');
         const sessionStatus = document.getElementById('sessionStatus');
 
-        if (!data.sessionId || !data.trackingEnabled || 
-            (data.lastActivity && (now - data.lastActivity > 30 * 60 * 1000))) {
-            
-            if (data.trackingEnabled) {
-                const newSessionId = generateSessionId();
-                chrome.storage.local.set({
-                    sessionId: newSessionId,
-                    sessionStart: now,
-                    lastActivity: now
-                });
-
-                sessionId.textContent = newSessionId;
-                sessionDuration.textContent = '0s';
-                sessionStatus.textContent = 'Active';
-            } else {
-                sessionId.textContent = '-';
-                sessionDuration.textContent = '-';
-                sessionStatus.textContent = 'Inactive (Tracking Disabled)';
-            }
+        if (!data.trackingEnabled) {
+            sessionId.textContent = '-';
+            sessionDuration.textContent = '-';
+            sessionStatus.textContent = 'Tracking Disabled';
+        } else if (!data.sessionId) {
+            sessionId.textContent = '-';
+            sessionDuration.textContent = '-';
+            sessionStatus.textContent = 'No Active Session';
         } else {
             sessionId.textContent = data.sessionId;
             sessionDuration.textContent = formatDuration(now - data.sessionStart);
             sessionStatus.textContent = 'Active';
-            
             chrome.storage.local.set({ lastActivity: now });
         }
     });
@@ -112,6 +96,32 @@ function removeSiteFromBlacklist(site) {
     });
 }
 
+function generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+function notifySessionEnd(sessionId) {
+    chrome.runtime.sendMessage({
+        type: 'tracking_state_changed', // Cambiado a "tracking_state_changed"
+        message: {
+            timestamp: new Date().toISOString(),
+            sessionId: sessionId,
+            action: 'end'
+        }
+    });
+}
+
+function notifySessionStart(sessionId) {
+    chrome.runtime.sendMessage({
+        type: 'tracking_state_changed', // Cambiado a "tracking_state_changed"
+        message: {
+            timestamp: new Date().toISOString(),
+            sessionId: sessionId,
+            action: 'start'
+        }
+    });
+}
+
 function updateTrackingButton(isEnabled) {
     const trackingButton = document.getElementById('toggleTracking');
     if (isEnabled) {
@@ -120,7 +130,7 @@ function updateTrackingButton(isEnabled) {
     } else {
         trackingButton.style.backgroundColor = '#f44336';
         trackingButton.textContent = 'Tracking Disabled';
-    }
+ }
     updateSessionInfo();
 }
 
@@ -149,6 +159,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('toggleTracking').addEventListener('click', () => {
         chrome.storage.local.get({ trackingEnabled: true }, (data) => {
             const newState = !data.trackingEnabled;
+            
+            if (!newState) {
+                // Al desactivar, finalizamos sesión y notificamos
+                chrome.storage.local.get(['sessionId'], (sessionData) => {
+                    if (sessionData.sessionId) {
+                        notifySessionEnd(sessionData.sessionId);
+                        chrome.storage.local.remove(['sessionId', 'sessionStart', 'lastActivity']);
+                    }
+                });
+            } else {
+                // Al activar, creamos sesión
+                const newSessionId = generateSessionId();
+                const now = Date.now();
+                
+                chrome.storage.local.set({
+                    sessionId: newSessionId,
+                    sessionStart: now,
+                    lastActivity: now
+                }, () => {
+                    notifySessionStart(newSessionId);
+                });
+            }
+            
             chrome.storage.local.set({ trackingEnabled: newState }, () => {
                 updateTrackingButton(newState);
             });

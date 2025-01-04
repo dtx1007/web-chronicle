@@ -34,6 +34,8 @@ def ws(ws) -> NoReturn:
                 print(f"Blaclist update message received: {message["message"]}")
             case "tracking_state_changed":
                 print(f"Tracking state changed message received: {message["message"]}")
+            case "session_state_changed":
+                print(f"Session state changed message received: {message["message"]}")
             case _:
                 print(f"Unknown message type received: '{message["type"]}'")
 

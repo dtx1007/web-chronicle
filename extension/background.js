@@ -2,6 +2,7 @@ import { Logger } from './logger.js';
 import clientWebSocket from './websocket.js';
 
 const WS_URL = 'ws://localhost:5000/ws';
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000; 
 const logger = new Logger('background.js');
 let blacklistedSites = [];
 let isTracking = true;
@@ -14,7 +15,7 @@ function setupWebSocket() {
 
     clientWebSocket.onClose(() => {
         logger.info('WebSocket connection closed');
-        setTimeout(clientWebSocket.connect(WS_URL), 5000);
+        setTimeout(() => clientWebSocket.connect(WS_URL), 5000); // Cambiado para usar una función
     });
 
     clientWebSocket.onAnyMessage((message) => {
@@ -23,6 +24,70 @@ function setupWebSocket() {
 
     clientWebSocket.onError((error) => {
         logger.error('WebSocket error:', error);
+    });
+}
+
+function generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+}
+
+function notifySessionEnd(sessionId) {
+    clientWebSocket.send('session_state_changed', {
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId,
+        action: 'end'
+    });
+}
+
+function notifySessionStart(sessionId) {
+    clientWebSocket.send('session_state_changed', {
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId,
+        action: 'start'
+    });
+}
+
+function startNewSession() {
+    const newSessionId = generateSessionId();
+    const now = Date.now();
+    
+    chrome.storage.local.set({
+        sessionId: newSessionId,
+        sessionStart: now,
+        lastActivity: now
+    }, () => {
+        notifySessionStart(newSessionId);
+    });
+    
+    return newSessionId;
+}
+
+function checkAndHandleInactivity() {
+    chrome.storage.local.get(['lastActivity', 'sessionId', 'trackingEnabled'], (data) => {
+        const now = Date.now();
+        
+        if (!data.trackingEnabled) {
+            logger.info('Tracking is disabled, skipping inactivity check');
+            return;
+        }
+
+        if (!data.lastActivity || !data.sessionId) {
+            logger.info('No previous session found, starting new session');
+            startNewSession();
+            return;
+        }
+
+        const timeSinceLastActivity = now - data.lastActivity;
+        if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
+            logger.info('Session timeout detected, starting new session');
+            notifySessionEnd(data.sessionId);
+            startNewSession();
+        } else {
+            logger.info('Session is still active', {
+                sessionId: data.sessionId,
+                timeSinceLastActivity: Math.floor(timeSinceLastActivity / 1000) + 's'
+            });
+        }
     });
 }
 
@@ -73,8 +138,8 @@ function sendTabEventToServer(event_name, tabId) {
 async function injectContentScriptToTab(tab) {
     const tabInfo = { tabId: tab.id, url: tab.url };
 
-    // TODO: Inyectar el script solo en pagians HTTP o HTTPS
-    if (tab.url && !isSiteBlacklisted(tab.url)) {
+    // Inyectar el script solo en páginas HTTP o HTTPS
+    if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')) && !isSiteBlacklisted(tab.url)) {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content.js'],
@@ -98,8 +163,9 @@ async function initExtension() {
     logger.info('Extension started');
     setupWebSocket();
 
-    // TODO: Cambiar esto para que espere a que la conexión se establezca realmente
-    await sleep(1000);
+    await new Promise((resolve) => {
+        clientWebSocket.onOpen(resolve);
+    });
 
     chrome.storage.sync.get({ blacklistedSites: [] }, (data) => {
         blacklistedSites = data.blacklistedSites;
@@ -112,6 +178,7 @@ async function initExtension() {
         sendTrackingStateToServer(isTracking);
 
         if (isTracking) {
+            checkAndHandleInactivity();
             reinjectAllContentScripts();
 
             // Al iniciar el tracking, se envía un evento por cada tab abierta
@@ -125,7 +192,7 @@ async function initExtension() {
                 }
             });
 
-            // Enviar tambien información relacioanda a la ventana (tamaño y nivel de zoom)
+            // Enviar también información relacionada a la ventana (tamaño y nivel de zoom)
             chrome.windows.getCurrent((window) => {
                 const windowData = {
                     width: window.width,
@@ -152,9 +219,20 @@ async function initExtension() {
         if (area === 'local' && changes.trackingEnabled) {
             isTracking = changes.trackingEnabled.newValue;
             logger.info('Tracking state changed:', isTracking);
-            sendTrackingStateToServer(isTracking);
 
             if (!isTracking) {
+                // Al desactivar tracking:
+                // 1. Obtener la sesión actual
+                // 2. Notificar que se cierra
+                // 3. Eliminar los datos de la sesión
+                chrome.storage.local.get(['sessionId'], (data) => {
+                    if (data.sessionId) {
+                        notifySessionEnd(data.sessionId);
+                        chrome.storage.local.remove(['sessionId', 'sessionStart', 'lastActivity']);
+                    }
+                });
+
+                // Detener scripts en las pestañas
                 const tabs = await chrome.tabs.query({});
                 for (const tab of tabs) {
                     try {
@@ -166,15 +244,26 @@ async function initExtension() {
                                 );
                             },
                         });
-                        logger.debug(
-                            'Content script listeners stopped for tab:',
-                            tab.id
-                        );
+                        logger.debug('Content script listeners stopped for tab:', tab.id);
                     } catch (error) {
                         logger.error('Error stopping content script:', error);
                     }
                 }
             } else {
+                // Al activar tracking:
+                // 1. Generar nueva sesión
+                // 2. Notificar nueva sesión
+                const newSessionId = generateSessionId();
+                const now = Date.now();
+
+                chrome.storage.local.set({
+                    sessionId: newSessionId,
+                    sessionStart: now,
+                    lastActivity: now
+                }, () => {
+                    notifySessionStart(newSessionId);
+                });
+
                 await reinjectAllContentScripts();
             }
         }
