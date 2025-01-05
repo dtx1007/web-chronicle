@@ -2,20 +2,50 @@ import { Logger } from './logger.js';
 import clientWebSocket from './websocket.js';
 
 const WS_URL = 'ws://localhost:5000/ws';
-const INACTIVITY_TIMEOUT = 30 * 60 * 1000; 
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 const logger = new Logger('background.js');
 let blacklistedSites = [];
 let isTracking = true;
 
 function setupWebSocket() {
+    const MAX_RECONNECT_ATTEMPTS = 25;
+    const SHORT_RECONNECT_DELAY = 5000; // 5 seconds
+    const LONG_RECONNECT_DELAY = 60000; // 1 minute
+    let numReconnects = 0;
+    let reconnectInterval = null;
+
+    function attemptReconnect() {
+        if (numReconnects >= MAX_RECONNECT_ATTEMPTS) {
+            logger.error('Max reconnect attempts reached. Stopping reconnection attempts.');
+            clearInterval(reconnectInterval);
+            return;
+        }
+
+        if (numReconnects % 5 === 0 && numReconnects !== 0) {
+            logger.info('Reached 5 reconnect attempts, waiting 1 minute before next attempt.');
+            clearInterval(reconnectInterval);
+            setTimeout(() => {
+                reconnectInterval = setInterval(attemptReconnect, SHORT_RECONNECT_DELAY);
+            }, LONG_RECONNECT_DELAY);
+        } else {
+            logger.info(
+                `Attempting to reconnect... (${numReconnects + 1}/${MAX_RECONNECT_ATTEMPTS})`
+            );
+            clientWebSocket.connect(WS_URL);
+            numReconnects++;
+        }
+    }
+
     clientWebSocket.connect(WS_URL);
     clientWebSocket.onOpen(() => {
         logger.info('WebSocket connection established');
+        numReconnects = 0;
+        clearInterval(reconnectInterval);
     });
 
     clientWebSocket.onClose(() => {
-        logger.info('WebSocket connection closed');
-        setTimeout(() => clientWebSocket.connect(WS_URL), 5000); // Cambiado para usar una función
+        logger.info('WebSocket connection closed, reconnecting in 5s...');
+        reconnectInterval = setInterval(attemptReconnect, SHORT_RECONNECT_DELAY);
     });
 
     clientWebSocket.onAnyMessage((message) => {
@@ -35,7 +65,7 @@ function notifySessionEnd(sessionId) {
     clientWebSocket.send('session_state_changed', {
         timestamp: new Date().toISOString(),
         sessionId: sessionId,
-        action: 'end'
+        action: 'end',
     });
 }
 
@@ -43,29 +73,32 @@ function notifySessionStart(sessionId) {
     clientWebSocket.send('session_state_changed', {
         timestamp: new Date().toISOString(),
         sessionId: sessionId,
-        action: 'start'
+        action: 'start',
     });
 }
 
 function startNewSession() {
     const newSessionId = generateSessionId();
     const now = Date.now();
-    
-    chrome.storage.local.set({
-        sessionId: newSessionId,
-        sessionStart: now,
-        lastActivity: now
-    }, () => {
-        notifySessionStart(newSessionId);
-    });
-    
+
+    chrome.storage.local.set(
+        {
+            sessionId: newSessionId,
+            sessionStart: now,
+            lastActivity: now,
+        },
+        () => {
+            notifySessionStart(newSessionId);
+        }
+    );
+
     return newSessionId;
 }
 
 function checkAndHandleInactivity() {
     chrome.storage.local.get(['lastActivity', 'sessionId', 'trackingEnabled'], (data) => {
         const now = Date.now();
-        
+
         if (!data.trackingEnabled) {
             logger.info('Tracking is disabled, skipping inactivity check');
             return;
@@ -85,7 +118,7 @@ function checkAndHandleInactivity() {
         } else {
             logger.info('Session is still active', {
                 sessionId: data.sessionId,
-                timeSinceLastActivity: Math.floor(timeSinceLastActivity / 1000) + 's'
+                timeSinceLastActivity: Math.floor(timeSinceLastActivity / 1000) + 's',
             });
         }
     });
@@ -124,9 +157,26 @@ function isSiteBlacklisted(url) {
     }
 }
 
+function isHostAllowed(url) {
+    if (!url) return false;
+
+    try {
+        const siteUrl = new URL(url);
+
+        if (siteUrl.protocol === 'https:' || siteUrl.protocol === 'http:') {
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        logger.error('Error checking allowed host:', error);
+        return false;
+    }
+}
+
 function sendTabEventToServer(event_name, tabId) {
     chrome.tabs.get(tabId, (tab) => {
-        if (tab && tab.url && !isSiteBlacklisted(tab.url)) {
+        if (tab && tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
             const eventData = { event: event_name, tabId: tabId, url: tab.url };
 
             logger.debug('Tab event:', eventData);
@@ -135,11 +185,35 @@ function sendTabEventToServer(event_name, tabId) {
     });
 }
 
+async function sendInitialTabAndWindowInfoToServer() {
+    // Enviar un evento por cada tab abierta
+    await chrome.tabs.query({}, (tabs) => {
+        if (tabs.length > 0) {
+            tabs.forEach((tab) => {
+                sendTabEventToServer('tab_created', tab.id);
+            });
+
+            sendTabEventToServer('tab_highlighted', tabs[0].id);
+        }
+    });
+
+    // Enviar también información relacionada a la ventana (tamaño y nivel de zoom)
+    await chrome.windows.getCurrent((window) => {
+        const windowData = {
+            width: window.width,
+            height: window.height,
+            zoom: window.zoomFactor,
+        };
+
+        clientWebSocket.send('window_data', windowData);
+    });
+}
+
 async function injectContentScriptToTab(tab) {
     const tabInfo = { tabId: tab.id, url: tab.url };
 
     // Inyectar el script solo en páginas HTTP o HTTPS
-    if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')) && !isSiteBlacklisted(tab.url)) {
+    if (tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content.js'],
@@ -180,28 +254,7 @@ async function initExtension() {
         if (isTracking) {
             checkAndHandleInactivity();
             reinjectAllContentScripts();
-
-            // Al iniciar el tracking, se envía un evento por cada tab abierta
-            chrome.tabs.query({}, (tabs) => {
-                if (tabs.length > 0) {
-                    tabs.forEach((tab) => {
-                        sendTabEventToServer('tab_created', tab.id);
-                    });
-
-                    sendTabEventToServer('tab_highlighted', tabs[0].id);
-                }
-            });
-
-            // Enviar también información relacionada a la ventana (tamaño y nivel de zoom)
-            chrome.windows.getCurrent((window) => {
-                const windowData = {
-                    width: window.width,
-                    height: window.height,
-                    zoom: window.zoomFactor,
-                };
-
-                clientWebSocket.send('window_data', windowData);
-            });
+            sendInitialTabAndWindowInfoToServer();
         }
     });
 
@@ -239,9 +292,7 @@ async function initExtension() {
                         await chrome.scripting.executeScript({
                             target: { tabId: tab.id },
                             function: () => {
-                                window.dispatchEvent(
-                                    new CustomEvent('tracking_disabled')
-                                );
+                                window.dispatchEvent(new CustomEvent('tracking_disabled'));
                             },
                         });
                         logger.debug('Content script listeners stopped for tab:', tab.id);
@@ -256,15 +307,19 @@ async function initExtension() {
                 const newSessionId = generateSessionId();
                 const now = Date.now();
 
-                chrome.storage.local.set({
-                    sessionId: newSessionId,
-                    sessionStart: now,
-                    lastActivity: now
-                }, () => {
-                    notifySessionStart(newSessionId);
-                });
+                chrome.storage.local.set(
+                    {
+                        sessionId: newSessionId,
+                        sessionStart: now,
+                        lastActivity: now,
+                    },
+                    () => {
+                        notifySessionStart(newSessionId);
+                    }
+                );
 
                 await reinjectAllContentScripts();
+                sendInitialTabAndWindowInfoToServer();
             }
         }
     });

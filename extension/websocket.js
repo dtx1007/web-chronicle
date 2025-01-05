@@ -75,9 +75,7 @@ class WebSocketClient {
     connect(url) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.close();
-            logger.info(
-                'WebSocket already openned, closing existing WebSocket connection...'
-            );
+            logger.info('WebSocket already openned, closing existing WebSocket connection...');
         }
 
         logger.info('Connecting to WebSocket:', { url });
@@ -103,13 +101,10 @@ class WebSocketClient {
             this.ws.send(JSON.stringify({ type, message }));
         } else {
             this.sendQueue.push(JSON.stringify({ type, message }));
-            logger.warn(
-                'Could not send message to server, WebSocket is not connected, data:',
-                {
-                    type,
-                    message,
-                }
-            );
+            logger.warn('Could not send message to server, WebSocket is not connected, data:', {
+                type,
+                message,
+            });
         }
     }
 }
@@ -118,23 +113,3 @@ const clientWebSocket = new WebSocketClient();
 const WS_URL = 'ws://localhost:5000/ws';
 
 export default clientWebSocket;
-
-export function setupWebSocket() {
-    clientWebSocket.connect(WS_URL);
-    clientWebSocket.onOpen(() => {
-        logger.info('WebSocket connection established');
-    });
-
-    clientWebSocket.onClose(() => {
-        logger.info('WebSocket connection closed');
-        setTimeout(clientWebSocket.connect(WS_URL), 5000);
-    });
-
-    clientWebSocket.onAnyMessage((message) => {
-        logger.info('Message received:', message);
-    });
-
-    clientWebSocket.onError((error) => {
-        logger.error('WebSocket error:', error);
-    });
-}
