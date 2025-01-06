@@ -8,44 +8,21 @@ let blacklistedSites = [];
 let isTracking = true;
 
 function setupWebSocket() {
-    const MAX_RECONNECT_ATTEMPTS = 25;
-    const SHORT_RECONNECT_DELAY = 5000; // 5 seconds
-    const LONG_RECONNECT_DELAY = 60000; // 1 minute
-    let numReconnects = 0;
-    let reconnectInterval = null;
+    const RECONNECT_DELAY = 5000;
 
     function attemptReconnect() {
-        if (numReconnects >= MAX_RECONNECT_ATTEMPTS) {
-            logger.error('Max reconnect attempts reached. Stopping reconnection attempts.');
-            clearInterval(reconnectInterval);
-            return;
-        }
-
-        if (numReconnects % 5 === 0 && numReconnects !== 0) {
-            logger.info('Reached 5 reconnect attempts, waiting 1 minute before next attempt.');
-            clearInterval(reconnectInterval);
-            setTimeout(() => {
-                reconnectInterval = setInterval(attemptReconnect, SHORT_RECONNECT_DELAY);
-            }, LONG_RECONNECT_DELAY);
-        } else {
-            logger.info(
-                `Attempting to reconnect... (${numReconnects + 1}/${MAX_RECONNECT_ATTEMPTS})`
-            );
-            clientWebSocket.connect(WS_URL);
-            numReconnects++;
-        }
+        logger.info('Reconnecting to WebSocket...');
+        clientWebSocket.connect(WS_URL);
     }
 
     clientWebSocket.connect(WS_URL);
     clientWebSocket.onOpen(() => {
         logger.info('WebSocket connection established');
-        numReconnects = 0;
-        clearInterval(reconnectInterval);
     });
 
     clientWebSocket.onClose(() => {
         logger.info('WebSocket connection closed, reconnecting in 5s...');
-        reconnectInterval = setInterval(attemptReconnect, SHORT_RECONNECT_DELAY);
+        setTimeout(attemptReconnect, RECONNECT_DELAY);
     });
 
     clientWebSocket.onAnyMessage((message) => {
@@ -62,6 +39,7 @@ function generateSessionId() {
 }
 
 function notifySessionEnd(sessionId) {
+    logger.info('Notifying session end:', { sessionId });
     clientWebSocket.send('session_state_changed', {
         timestamp: new Date().toISOString(),
         sessionId: sessionId,
@@ -70,6 +48,7 @@ function notifySessionEnd(sessionId) {
 }
 
 function notifySessionStart(sessionId) {
+    logger.info('Notifying session start:', { sessionId });
     clientWebSocket.send('session_state_changed', {
         timestamp: new Date().toISOString(),
         sessionId: sessionId,
@@ -124,21 +103,6 @@ function checkAndHandleInactivity() {
     });
 }
 
-function sendTrackingStateToServer(enabled) {
-    const stateData = {
-        timestamp: new Date().toISOString(),
-        enabled: enabled,
-        sessionId: null,
-    };
-
-    chrome.storage.local.get(['sessionId'], (data) => {
-        if (data.sessionId) {
-            stateData.sessionId = data.sessionId;
-        }
-        clientWebSocket.send('tracking_state_changed', stateData);
-    });
-}
-
 function isSiteBlacklisted(url) {
     if (!url) return true;
 
@@ -176,8 +140,15 @@ function isHostAllowed(url) {
 
 function sendTabEventToServer(event_name, tabId) {
     chrome.tabs.get(tabId, (tab) => {
-        if (tab && tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
-            const eventData = { event: event_name, tabId: tabId, url: tab.url };
+        if (tab && tab.url && isHostAllowed(tab.url) && !isSiteBlacklisted(tab.url)) {
+            const eventData = {
+                event: event_name,
+                timestamp: new Date().toISOString(),
+                details: {
+                    tabId: tabId,
+                    url: tab.url,
+                },
+            };
 
             logger.debug('Tab event:', eventData);
             clientWebSocket.send('tab_event', eventData);
@@ -193,6 +164,7 @@ async function sendInitialTabAndWindowInfoToServer() {
                 sendTabEventToServer('tab_created', tab.id);
             });
 
+            // Tener en cuenta que no siempre es la tab 1 la que está activa
             sendTabEventToServer('tab_highlighted', tabs[0].id);
         }
     });
@@ -213,12 +185,33 @@ async function injectContentScriptToTab(tab) {
     const tabInfo = { tabId: tab.id, url: tab.url };
 
     // Inyectar el script solo en páginas HTTP o HTTPS
-    if (tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
+    if (tab.url && isHostAllowed(tab.url) && !isSiteBlacklisted(tab.url)) {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content.js'],
         });
         logger.debug('Content script injected to tab:', tabInfo);
+    }
+}
+
+async function stopContentScript(tab) {
+    const tabInfo = { tabId: tab.id, url: tab.url };
+
+    if (tab.url && isHostAllowed(tab.url) && !isSiteBlacklisted(tab.url)) {
+        await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: () => {
+                window.dispatchEvent(new CustomEvent('tracking_disabled'));
+            },
+        });
+        logger.debug('Content script listeners stopped for tab:', tabInfo);
+    }
+}
+
+async function stopAllContentScripts() {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+        await stopContentScript(tab);
     }
 }
 
@@ -229,10 +222,6 @@ async function reinjectAllContentScripts() {
     }
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function initExtension() {
     logger.info('Extension started');
     setupWebSocket();
@@ -240,6 +229,8 @@ async function initExtension() {
     await new Promise((resolve) => {
         clientWebSocket.onOpen(resolve);
     });
+
+    logger.info('test');
 
     chrome.storage.sync.get({ blacklistedSites: [] }, (data) => {
         blacklistedSites = data.blacklistedSites;
@@ -249,9 +240,9 @@ async function initExtension() {
     chrome.storage.local.get({ trackingEnabled: true }, (data) => {
         isTracking = data.trackingEnabled;
         logger.info('Tracking enabled:', isTracking);
-        sendTrackingStateToServer(isTracking);
 
         if (isTracking) {
+            startNewSession();
             checkAndHandleInactivity();
             reinjectAllContentScripts();
             sendInitialTabAndWindowInfoToServer();
@@ -261,8 +252,8 @@ async function initExtension() {
     chrome.storage.onChanged.addListener(async (changes, area) => {
         if (area === 'sync' && changes.blacklistedSites) {
             blacklistedSites = changes.blacklistedSites.newValue || [];
-            logger.info('Updated blacklisted sites:', blacklistedSites);
-            clientWebSocket.send('update_blacklist', blacklistedSites);
+            logger.info('Updated blacklisted sites:', { blacklistedSites });
+            clientWebSocket.send('update_blacklist', { blacklistedSites });
 
             if (isTracking) {
                 await reinjectAllContentScripts();
@@ -286,20 +277,7 @@ async function initExtension() {
                 });
 
                 // Detener scripts en las pestañas
-                const tabs = await chrome.tabs.query({});
-                for (const tab of tabs) {
-                    try {
-                        await chrome.scripting.executeScript({
-                            target: { tabId: tab.id },
-                            function: () => {
-                                window.dispatchEvent(new CustomEvent('tracking_disabled'));
-                            },
-                        });
-                        logger.debug('Content script listeners stopped for tab:', tab.id);
-                    } catch (error) {
-                        logger.error('Error stopping content script:', error);
-                    }
-                }
+                stopAllContentScripts();
             } else {
                 // Al activar tracking:
                 // 1. Generar nueva sesión
