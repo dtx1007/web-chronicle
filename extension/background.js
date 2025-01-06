@@ -176,8 +176,15 @@ function isHostAllowed(url) {
 
 function sendTabEventToServer(event_name, tabId) {
     chrome.tabs.get(tabId, (tab) => {
-        if (tab && tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
-            const eventData = { event: event_name, tabId: tabId, url: tab.url };
+        if (tab && tab.url && isHostAllowed(tab.url) && !isSiteBlacklisted(tab.url)) {
+            const eventData = {
+                event: event_name,
+                timestamp: new Date().toISOString(),
+                details: {
+                    tabId: tabId,
+                    url: tab.url,
+                },
+            };
 
             logger.debug('Tab event:', eventData);
             clientWebSocket.send('tab_event', eventData);
@@ -193,6 +200,7 @@ async function sendInitialTabAndWindowInfoToServer() {
                 sendTabEventToServer('tab_created', tab.id);
             });
 
+            // Tener en cuenta que no siempre es la tab 1 la que está activa
             sendTabEventToServer('tab_highlighted', tabs[0].id);
         }
     });
@@ -213,7 +221,7 @@ async function injectContentScriptToTab(tab) {
     const tabInfo = { tabId: tab.id, url: tab.url };
 
     // Inyectar el script solo en páginas HTTP o HTTPS
-    if (tab.url && isHostAllowed(url) && !isSiteBlacklisted(tab.url)) {
+    if (tab.url && isHostAllowed(tab.url) && !isSiteBlacklisted(tab.url)) {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content.js'],
