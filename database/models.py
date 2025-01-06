@@ -26,7 +26,7 @@ class Session(db.Model):
 
         Parámetros:
         ------------
-        eventName: str
+        eventType: str
             Tipo de la interacción del usuario sobre la web en la sesión actual.
         eventDetails: str
             Detalles de la interacción del usuario sobre la web en la sesión actual.
@@ -39,7 +39,13 @@ class Session(db.Model):
         new_interaction = Interaction(
             type=eventType, details=eventDetails, time=datetime.now(), session=self
         )
+
+        # Agregamos explícitamente la nueva interacción a la sesión para que SQLAlchemy la reconozca
+        db.session.add(new_interaction)
+
+        # Añadimos la interacción a la lista de interacciones de la sesión
         self.interactions.append(new_interaction)
+
         return new_interaction
 
     def get_user_interactions(self) -> Generator[dict[str, Any], None, None]:
@@ -87,3 +93,4 @@ class Interaction(db.Model):
         Permite obtener en forma de String la información de la interacción actual.
         """
         return f"<Interaction(id={self.id}, type={self.type}, details={self.details}, time={self.time})"
+
