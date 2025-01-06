@@ -69,7 +69,7 @@ def is_valid_message(message: str) -> bool:
 
 
 @app.teardown_appcontext
-def shutdown_session(exception=None):
+def shutdown_session(exception=None) -> None:
     db.session.remove()
 
 
@@ -94,8 +94,8 @@ def ws(ws) -> NoReturn:
             continue
 
         message = loads(message)
-        message_type = message["type"]
-        message_data = message["message"]
+        message_type: dict = message["type"]
+        message_data: dict = message["message"]
 
         # Formato de ejemplo de los mensajes recibidos:
         #
@@ -128,15 +128,13 @@ def ws(ws) -> NoReturn:
                     print("No session started, window data message ignored.")
                     continue
 
-                current_session.window_width = message_data["width"]
-                current_session.window_height = message_data["height"]
+                current_session.window_width = message_data.get("width", 480)
+                current_session.window_height = message_data.get("height", 360)
                 db.session.commit()
 
                 print(f"Window data message received: {message["message"]}")
             case "update_blacklist":
                 print(f"Blaclist update message received: {message["message"]}")
-            case "tracking_state_changed":
-                print(f"Tracking state changed message received: {message["message"]}")
             case "session_state_changed":
                 # Iniciar la sesión -> añade una nueva sesión a la base de datos.
 

@@ -59,7 +59,7 @@ function updateSessionInfo() {
 function updateBlacklistUI(blacklistedSites) {
     const blacklistElement = document.getElementById('blacklist');
     if (!blacklistElement) return;
-    
+
     blacklistElement.innerHTML = '';
 
     blacklistedSites.forEach((site) => {
@@ -100,28 +100,6 @@ function generateSessionId() {
     return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
-function notifySessionEnd(sessionId) {
-    chrome.runtime.sendMessage({
-        type: 'tracking_state_changed', // Cambiado a "tracking_state_changed"
-        message: {
-            timestamp: new Date().toISOString(),
-            sessionId: sessionId,
-            action: 'end'
-        }
-    });
-}
-
-function notifySessionStart(sessionId) {
-    chrome.runtime.sendMessage({
-        type: 'tracking_state_changed', // Cambiado a "tracking_state_changed"
-        message: {
-            timestamp: new Date().toISOString(),
-            sessionId: sessionId,
-            action: 'start'
-        }
-    });
-}
-
 function updateTrackingButton(isEnabled) {
     const trackingButton = document.getElementById('toggleTracking');
     if (isEnabled) {
@@ -159,29 +137,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('toggleTracking').addEventListener('click', () => {
         chrome.storage.local.get({ trackingEnabled: true }, (data) => {
             const newState = !data.trackingEnabled;
-            
-            if (!newState) {
-                // Al desactivar, finalizamos sesión y notificamos
-                chrome.storage.local.get(['sessionId'], (sessionData) => {
-                    if (sessionData.sessionId) {
-                        notifySessionEnd(sessionData.sessionId);
-                        chrome.storage.local.remove(['sessionId', 'sessionStart', 'lastActivity']);
-                    }
-                });
-            } else {
+
+            if (newState) {
                 // Al activar, creamos sesión
                 const newSessionId = generateSessionId();
                 const now = Date.now();
-                
+
                 chrome.storage.local.set({
                     sessionId: newSessionId,
                     sessionStart: now,
                     lastActivity: now
-                }, () => {
-                    notifySessionStart(newSessionId);
                 });
             }
-            
+
             chrome.storage.local.set({ trackingEnabled: newState }, () => {
                 updateTrackingButton(newState);
             });
