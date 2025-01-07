@@ -40,7 +40,6 @@ def test_create_session(setup_tests: None):
         db_manager = DatabaseManager(db)
         db_session = db_manager.get_session(db)
 
-        # L: Quitado el campo name, que no tienen las sesiones.
         new_session = Session(
             id="session_001", start_time=datetime.now(), end_time=datetime.now() + timedelta(hours=1)
         )
