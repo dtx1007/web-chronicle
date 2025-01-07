@@ -1,5 +1,73 @@
 let isTracking = true;
-let eventListeners = [];
+let documentEventListeners = [];
+let windowEventListeners = [];
+
+function getElementByXpath(path) {
+    return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null)
+        .singleNodeValue;
+}
+
+// From: https://gist.github.com/abkarim/ab0e0e3b629e9a80c31db323f4373bcb
+/**
+ * Get absolute xPath position from dom element
+ * xPath position will does not contain any id, class or attribute, etc selector
+ * Because, Some page use random id and class. This function should ignore that kind problem, so we're not using any selector
+ *
+ * @param {Element} element element to get position
+ * @returns {String} xPath string
+ */
+function getXPath(element) {
+    // Selector
+    let selector = '';
+    // Loop handler
+    let foundRoot;
+    // Element handler
+    let currentElement = element;
+
+    // Do action until we reach html element
+    do {
+        // Get element tag name
+        const tagName = currentElement.tagName.toLowerCase();
+        // Get parent element
+        const parentElement = currentElement.parentElement;
+
+        // Count children
+        if (parentElement.childElementCount > 1) {
+            // Get children of parent element
+            const parentsChildren = [...parentElement.children];
+            // Count current tag
+            let tag = [];
+            parentsChildren.forEach((child) => {
+                if (child.tagName.toLowerCase() === tagName) tag.push(child); // Append to tag
+            });
+
+            // Is only of type
+            if (tag.length === 1) {
+                // Append tag to selector
+                selector = `/${tagName}${selector}`;
+            } else {
+                // Get position of current element in tag
+                const position = tag.indexOf(currentElement) + 1;
+                // Append tag to selector
+                selector = `/${tagName}[${position}]${selector}`;
+            }
+        } else {
+            //* Current element has no siblings
+            // Append tag to selector
+            selector = `/${tagName}${selector}`;
+        }
+
+        // Set parent element to current element
+        currentElement = parentElement;
+        // Is root
+        foundRoot = parentElement.tagName.toLowerCase() === 'html';
+        // Finish selector if found root element
+        if (foundRoot) selector = `/html${selector}`;
+    } while (foundRoot === false);
+
+    // Return selector
+    return selector;
+}
 
 function logEvent(eventName, details) {
     if (!isTracking) return;
@@ -51,11 +119,33 @@ function registerBufferedEvent(eventName, details, maxEvents) {
     };
 }
 
+function attachEventListeners(documentEventListeners, windowEventListeners) {
+    documentEventListeners.forEach((listener) => {
+        document.addEventListener(listener.type, listener.handler);
+    });
+
+    windowEventListeners.forEach((listener) => {
+        window.addEventListener(listener.type, listener.handler);
+    });
+}
+
+function removeEventListeners(documentEventListeners, windowEventListeners) {
+    documentEventListeners.forEach((listener) => {
+        document.removeEventListener(listener.type, listener.handler);
+    });
+
+    windowEventListeners.forEach((listener) => {
+        window.removeEventListener(listener.type, listener.handler);
+    });
+
+    documentEventListeners = [];
+    windowEventListeners = [];
+}
+
 const logClick = registerSimpleEvent('click', (event) => {
     return {
+        path: getXPath(event.target),
         target: event.target.tagName,
-        id: event.target.id,
-        clases: event.target.classList,
         x: event.clientX,
         y: event.clientY,
     };
@@ -74,6 +164,7 @@ const logScroll = registerDebouncedEvent(
 
 const logInput = registerSimpleEvent('input', (event) => {
     return {
+        path: getXPath(event.target),
         target: event.target.tagName,
         key: event.key,
         modAlt: event.altKey,
@@ -83,30 +174,30 @@ const logInput = registerSimpleEvent('input', (event) => {
     };
 });
 
-function attachEventListeners() {
-    eventListeners = [
-        { type: 'click', handler: logClick },
-        { type: 'scroll', handler: logScroll },
-        { type: 'keydown', handler: logInput }
-    ];
+const logResize = registerDebouncedEvent(
+    'resize',
+    () => {
+        return {
+            width: window.innerWidth,
+            height: window.innerHeight,
+        };
+    },
+    500
+);
 
-    eventListeners.forEach(listener => {
-        document.addEventListener(listener.type, listener.handler);
-    });
-}
+documentEventListeners = [
+    { type: 'click', handler: logClick },
+    { type: 'scroll', handler: logScroll },
+    { type: 'keydown', handler: logInput },
+];
 
-function removeEventListeners() {
-    eventListeners.forEach(listener => {
-        document.removeEventListener(listener.type, listener.handler);
-    });
-    eventListeners = [];
-}
+windowEventListeners = [{ type: 'resize', handler: logResize }];
 
 // Verificar estado inicial del tracking y configurar listeners
 chrome.storage.local.get({ trackingEnabled: true }, (data) => {
     isTracking = data.trackingEnabled;
     if (isTracking) {
-        attachEventListeners();
+        attachEventListeners(documentEventListeners, windowEventListeners);
     }
 });
 
@@ -115,18 +206,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.trackingEnabled) {
         isTracking = changes.trackingEnabled.newValue;
         if (isTracking) {
-            attachEventListeners();
+            attachEventListeners(documentEventListeners, windowEventListeners);
         } else {
-            removeEventListeners();
+            removeEventListeners(documentEventListeners, windowEventListeners);
         }
     }
 });
 
 window.addEventListener('tracking_disabled', () => {
     isTracking = false;
-    removeEventListeners();
+    removeEventListeners(documentEventListeners, windowEventListeners);
 });
 
 if (isTracking) {
-    attachEventListeners();
+    attachEventListeners(documentEventListeners, windowEventListeners);
 }

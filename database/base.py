@@ -1,17 +1,20 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import scoped_session, sessionmaker
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase
 
-# Declaramos la base que usa como referencia para crear las tablas.
-Base = declarative_base()
 
-# Configuramos el motor y la sesión.
-engine = create_engine('sqlite:///:memory:')
-SessionMaker = sessionmaker(bind=engine)
+class Base(DeclarativeBase):
+    pass
+
+
+db: SQLAlchemy = SQLAlchemy(model_class=Base)
+
 
 def initialize_database():
-    '''
-    Inicializa la base de datos y crea las diferentes tablas si no existen.
-    '''
-    global engine, SessionMaker
-    # Inicializamos la base de datos con sus correspondientes tablas.
-    Base.metadata.create_all(engine)
+    """
+    Inicializa la base de datos creando todas las tablas definidas en los modelos.
+    """
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    db.session = scoped_session(sessionmaker(bind=engine))
