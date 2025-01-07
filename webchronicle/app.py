@@ -72,7 +72,7 @@ def is_valid_message(message: str) -> bool:
 
 def process_tab_event(message_data: dict, session_id: str) -> None:
     """Process tab events and update visited sites"""
-    if message_data.get('event') == 'tab_created' and 'details' in message_data:
+    if message_data.get('event') == 'tab_created' or message_data.get('event') == 'tab_updated' and 'details' in message_data:
         details = message_data['details']
         if 'url' in details:
             url = details['url']
