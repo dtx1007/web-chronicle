@@ -1,13 +1,12 @@
 from typing import NoReturn, no_type_check
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_sock import Sock
 from time import sleep
 from dateutil.parser import parse as parse_date
 from json import loads, dumps, JSONDecodeError
-from sqlalchemy import func, desc
 from database.base import db
 from database.manager import DatabaseManager
-from database.models import Session, Interaction
+from database.models import Session, Interaction, VisitedSite
 
 ### Configuración de la aplicación ###
 
@@ -72,6 +71,37 @@ def is_valid_message(message: str) -> bool:
     return True
 
 
+def process_tab_event(message_data: dict, session_id: str) -> None:
+    """Process tab events and update visited sites"""
+    if (
+        message_data.get("event") == "tab_created"
+        or message_data.get("event") == "tab_updated"
+        and "details" in message_data
+    ):
+        details = message_data["details"]
+        if "url" in details:
+            url = details["url"]
+            timestamp = parse_date(message_data["timestamp"])
+
+            # Check if site exists
+            site = VisitedSite.query.filter_by(url=url).first()
+            session = Session.query.get(session_id)
+
+            if site:
+                site.visit_count += 1
+                site.last_visit = timestamp
+                if session not in site.sessions:
+                    site.sessions.append(session)
+            else:
+                site = VisitedSite(
+                    url=url, visit_count=1, first_visit=timestamp, last_visit=timestamp
+                )
+                db.session.add(site)
+                site.sessions.append(session)
+
+            db.session.commit()
+
+
 ### Rutas ###
 
 
@@ -80,15 +110,21 @@ def shutdown_session(exception=None) -> None:
     db.session.remove()
 
 
-@app.route("/sites")
-def sites_page():
-    return render_template("sites.html")
-
-
 @app.route("/")
-def index() -> str:
-    sessions = Session.query.all()
-    return render_template("index.html", sessions=sessions)
+def sites_page():
+    sites = VisitedSite.query.order_by(VisitedSite.visit_count.desc()).all()
+    return render_template("sites.html", sites=sites)
+
+
+@app.route("/sessions")
+def sessions_index():
+    site_id = request.args.get("site_id", type=int)
+    if site_id:
+        site = VisitedSite.query.get_or_404(site_id)
+        sessions = site.sessions
+    else:
+        sessions = Session.query.order_by(Session.start_time.desc()).all()
+    return render_template("sessions.html", sessions=sessions)
 
 
 @app.route("/events/<session_id>")
@@ -157,6 +193,7 @@ def ws(ws) -> NoReturn:
                     ws.send(dumps({"type": "error", "message": "No session started"}))
                     continue
                 add_interaction(message_data, current_session.id, interaction_buffer)
+                process_tab_event(message_data, current_session.id)
                 print(f"Tab event message received: {message['message']}")
 
             case "window_data":
