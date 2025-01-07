@@ -135,7 +135,30 @@ def view_events(session_id: str) -> str:
 
 @app.route("/play/<session_id>")
 def play_session(session_id: str) -> str:
-    return f"Reproduciendo la sesión con ID: {session_id}"
+    session = Session.query.get(session_id)
+    if not session:
+        return render_template(
+            "player.html",
+            session_id=session_id,
+            actions=[],
+            tabs=[],
+            error="Session not found",
+        )
+
+    interactions = Interaction.query.filter_by(session_id=session_id).all()
+    actions = [
+        {"event": interaction.type, "details": interaction.details}
+        for interaction in interactions
+    ]
+
+    tabs = []
+    for action in actions:
+        if action["event"] in ["tab_created", "tab_updated"]:
+            tabs.append(action["details"])
+
+    return render_template(
+        "player.html", session_id=session_id, actions=actions, tabs=tabs, error=None
+    )
 
 
 # Formato de ejemplo de los mensajes recibidos:
