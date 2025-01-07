@@ -228,7 +228,9 @@ def ws(ws) -> NoReturn:
                         current_session is not None
                     ):  # Asegúrate de que current_session no sea None
                         current_session.end_time = parse_date(message_data["timestamp"])
+                        db.session.add_all(interaction_buffer)
                         db.session.commit()
+                        interaction_buffer.clear()
                         current_session = None
                         print(f"Session ended: {message['message']}")
                     else:

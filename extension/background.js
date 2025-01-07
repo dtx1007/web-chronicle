@@ -230,8 +230,6 @@ async function initExtension() {
         clientWebSocket.onOpen(resolve);
     });
 
-    logger.info('test');
-
     chrome.storage.sync.get({ blacklistedSites: [] }, (data) => {
         blacklistedSites = data.blacklistedSites;
         logger.info('Loaded blacklisted sites:', blacklistedSites);

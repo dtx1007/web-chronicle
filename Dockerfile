@@ -16,8 +16,9 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry install --without dev,test --no-root && rm -rf $POETRY_CACHE_DIR
 
 COPY webchronicle ./webchronicle
+COPY database ./database
 
 RUN poetry install --without dev
 
 EXPOSE 80
-ENTRYPOINT ["poetry", "run", "flask", "run", "--debug", "--host", "0.0.0.0", "--port", "80"]
+ENTRYPOINT ["poetry", "run", "flask", "run", "--debug", "--host", "0.0.0.0", "--port", "5050"]
