@@ -1,13 +1,12 @@
 from typing import NoReturn, no_type_check
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_sock import Sock
 from time import sleep
 from dateutil.parser import parse as parse_date
 from json import loads, dumps, JSONDecodeError
-from sqlalchemy import func, desc
 from database.base import db
 from database.manager import DatabaseManager
-from database.models import Session, Interaction
+from database.models import Session, Interaction, VisitedSite
 
 ### Configuración de la aplicación ###
 
@@ -28,6 +27,7 @@ INTERACTION_BUFFER_SIZE = 10
 
 ### Funciones auxiliares ###
 
+
 def add_interaction(
     message_data: dict, session_id: str, interaction_buffer: list[Interaction]
 ) -> None:
@@ -35,11 +35,11 @@ def add_interaction(
     parsed_time = parse_date(timestamp) if timestamp else None
 
     if "details" not in message_data:
-        return  
+        return
 
     interaction = Interaction(
         type=message_data["event"],
-        time=parsed_time,  
+        time=parsed_time,
         details=message_data["details"],
         session_id=session_id,
     )
@@ -49,6 +49,7 @@ def add_interaction(
         db.session.add_all(interaction_buffer)
         db.session.commit()
         interaction_buffer.clear()
+
 
 def is_valid_message(message: str) -> bool:
     try:
@@ -69,21 +70,57 @@ def is_valid_message(message: str) -> bool:
 
     return True
 
+def process_tab_event(message_data: dict, session_id: str) -> None:
+    """Process tab events and update visited sites"""
+    if message_data.get('event') == 'tab_created' and 'details' in message_data:
+        details = message_data['details']
+        if 'url' in details:
+            url = details['url']
+            timestamp = parse_date(message_data['timestamp'])
+            
+            # Check if site exists
+            site = VisitedSite.query.filter_by(url=url).first()
+            session = Session.query.get(session_id)
+            
+            if site:
+                site.visit_count += 1
+                site.last_visit = timestamp
+                if session not in site.sessions:
+                    site.sessions.append(session)
+            else:
+                site = VisitedSite(
+                    url=url,
+                    visit_count=1,
+                    first_visit=timestamp,
+                    last_visit=timestamp
+                )
+                db.session.add(site)
+                site.sessions.append(session)
+            
+            db.session.commit()
 
 ### Rutas ###
+
 
 @app.teardown_appcontext
 def shutdown_session(exception=None) -> None:
     db.session.remove()
 
-@app.route("/sites")
-def sites_page():
-    return render_template('sites.html')
 
 @app.route("/")
-def index() -> str:
-    sessions = Session.query.all()
-    return render_template("index.html", sessions=sessions)
+def sites_page():
+   sites = VisitedSite.query.order_by(VisitedSite.visit_count.desc()).all()
+   return render_template("sites.html", sites=sites)
+
+@app.route("/sessions")
+def sessions_index():
+    site_id = request.args.get('site_id', type=int)
+    if site_id:
+        site = VisitedSite.query.get_or_404(site_id)
+        sessions = site.sessions
+    else:
+        sessions = Session.query.order_by(Session.start_time.desc()).all()
+    return render_template("sessions.html", sessions=sessions)
 
 @app.route("/events/<session_id>")
 def view_events(session_id: str) -> str:
@@ -94,22 +131,24 @@ def view_events(session_id: str) -> str:
 def play_session(session_id: str) -> str:
     return f"Reproduciendo la sesión con ID: {session_id}"
 
+
 # Formato de ejemplo de los mensajes recibidos:
-        #
-        # base: {type: "tipo", message: {detalles}}
-        #
-        # evento: {type: "event_logged", message: {event: "click", timestamp: "2021-09-01 12:00:00", details: {x: 100, y: 120, target: "button", "id": 1, classes: ["btn", "btn-primary"]}}}
-        #
-        # tab: {type: "tab_event", message: {event: "tab_created", timestamp: "2021-09-01 12:00:00", details: {tabId: 1, url: "https://www.google.com"}}}
-        #
-        # window: {type: "window_data", message: {with: 1920, height: 1080, zoom: 1}}
-        #
-        # blacklist: {type: "update_blacklist", message: {blacklistedsites: ["facebook.com", "twitter.com"]}}
-        #
-        # tracking: {type: "tracking_state_changed", message: {timestamp: "2021-09-01 12:00:00", state: True, sessionId: 1}}
-        #
-        # session: {type: "session_state_changed", message: {timestamp: "2021-09-01 12:00:00", sessionId: 1, action: "end"}}
-        #
+#
+# base: {type: "tipo", message: {detalles}}
+#
+# evento: {type: "event_logged", message: {event: "click", timestamp: "2021-09-01 12:00:00", details: {x: 100, y: 120, target: "button", "id": 1, classes: ["btn", "btn-primary"]}}}
+#
+# tab: {type: "tab_event", message: {event: "tab_created", timestamp: "2021-09-01 12:00:00", details: {tabId: 1, url: "https://www.google.com"}}}
+#
+# window: {type: "window_data", message: {with: 1920, height: 1080, zoom: 1}}
+#
+# blacklist: {type: "update_blacklist", message: {blacklistedsites: ["facebook.com", "twitter.com"]}}
+#
+# tracking: {type: "tracking_state_changed", message: {timestamp: "2021-09-01 12:00:00", state: True, sessionId: 1}}
+#
+# session: {type: "session_state_changed", message: {timestamp: "2021-09-01 12:00:00", sessionId: 1, action: "end"}}
+#
+
 
 @sock.route("/ws")
 @no_type_check
@@ -148,6 +187,7 @@ def ws(ws) -> NoReturn:
                     ws.send(dumps({"type": "error", "message": "No session started"}))
                     continue
                 add_interaction(message_data, current_session.id, interaction_buffer)
+                process_tab_event(message_data, current_session.id)
                 print(f"Tab event message received: {message['message']}")
 
             case "window_data":
@@ -178,7 +218,9 @@ def ws(ws) -> NoReturn:
 
                     print(f"Session started: {message['message']}")
                 elif message_data["action"] == "end":
-                    if current_session is not None:  # Asegúrate de que current_session no sea None
+                    if (
+                        current_session is not None
+                    ):  # Asegúrate de que current_session no sea None
                         current_session.end_time = parse_date(message_data["timestamp"])
                         db.session.commit()
                         current_session = None
@@ -186,7 +228,9 @@ def ws(ws) -> NoReturn:
                     else:
                         print("No active session to end.")
                 else:
-                    print(f"Unknown session action received: '{message_data['action']}'")
+                    print(
+                        f"Unknown session action received: '{message_data['action']}'"
+                    )
             case _:
                 print(f"Unknown message type received: '{message['type']}'")
 
