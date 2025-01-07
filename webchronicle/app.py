@@ -69,26 +69,6 @@ def is_valid_message(message: str) -> bool:
 
     return True
 
-def get_site_visits():
-    """Obtiene la cantidad de visitas por cada URL en la base de datos."""
-    visits = (
-        db.session.query(Interaction.details.label('url'), func.count(Interaction.details).label('visit_count'))
-        .filter(Interaction.type == 'tab_event')  # Filtrar solo los eventos de tipo tab_event
-        .group_by(Interaction.details)
-        .order_by(desc('visit_count'))
-        .all()
-    )
-    return visits
-
-def get_sessions_for_url(url):
-    """Obtiene todas las sesiones en las que se visitó una URL específica."""
-    sessions = (
-        db.session.query(Session)
-        .join(Interaction, Interaction.session_id == Session.id)
-        .filter(Interaction.details == url)
-        .all()
-    )
-    return sessions
 
 ### Rutas ###
 
@@ -96,15 +76,14 @@ def get_sessions_for_url(url):
 def shutdown_session(exception=None) -> None:
     db.session.remove()
 
-@app.route("/")
+@app.route("/sites")
 def sites_page():
-    visits = get_site_visits()
-    return render_template('sites.html', visits=visits)
+    return render_template('sites.html')
 
-@app.route('/sessions/<path:url>')
-def sessions_for_url(url):
-    sessions = get_sessions_for_url(url)
-    return render_template('index.html', sessions=sessions, url=url)
+@app.route("/")
+def index() -> str:
+    sessions = Session.query.all()
+    return render_template("index.html", sessions=sessions)
 
 @app.route("/events/<session_id>")
 def view_events(session_id: str) -> str:
