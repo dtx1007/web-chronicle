@@ -93,4 +93,3 @@ class Interaction(db.Model):
         Permite obtener en forma de String la información de la interacción actual.
         """
         return f"<Interaction(id={self.id}, type={self.type}, details={self.details}, time={self.time})"
-
